@@ -10,10 +10,19 @@ import torch.distributed as dist
 from kernel import act_quant, weight_dequant, fp8_gemm
 
 
-world_size = 1
+# 分布式训练的进程总数,单进程时为1
+world_size = 1  
+
+# 当前进程的rank编号,单进程时为0
 rank = 0
+
+# 量化计算时的block大小
 block_size = 128
+
+# gemm计算实现方式:"bf16"或"fp8"
 gemm_impl: Literal["bf16", "fp8"] = "bf16"
+
+# 注意力计算实现方式:"naive"为普通实现,"absorb"为优化实现
 attn_impl: Literal["naive", "absorb"] = "absorb"
 
 @dataclass
@@ -86,10 +95,11 @@ class ModelArgs:
 
 class ParallelEmbedding(nn.Module):
     """
+    并行词嵌入层
     Embedding layer with parallelism support across distributed processes.
 
     Args:
-        vocab_size (int): Vocabulary size.
+        vocab_size (int): Vocabulary size. 
         dim (int): Embedding dimension.
     """
     def __init__(self, vocab_size: int, dim: int):
@@ -122,7 +132,7 @@ class ParallelEmbedding(nn.Module):
         y = F.embedding(x, self.weight)
         if world_size > 1:
             y[mask] = 0
-            dist.all_reduce(y)
+            dist.all_reduce(y)  "合并结果"
         return y
 
 
@@ -163,6 +173,7 @@ def linear(x: torch.Tensor, weight: torch.Tensor, bias: Optional[torch.Tensor] =
 
 class Linear(nn.Module):
     """
+    线性变换层
     Custom linear layer with support for quantized weights and optional bias.
 
     Args:
@@ -531,6 +542,7 @@ class MLP(nn.Module):
 
 class Gate(nn.Module):
     """
+    路由：选择专家模型
     Gating mechanism for routing inputs in a mixture-of-experts (MoE) model.
 
     Attributes:
@@ -558,7 +570,7 @@ class Gate(nn.Module):
         self.score_func = args.score_func
         self.route_scale = args.route_scale
         self.weight = nn.Parameter(torch.empty(args.n_routed_experts, args.dim))
-        self.bias = nn.Parameter(torch.empty(args.n_routed_experts)) if self.dim == 7168 else None
+        self.bias = nn.Parameter(torch.empty(args.n_routed_experts)) if self.dim == 7168 else None  "通过偏置bias实现负载均衡"
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -570,7 +582,7 @@ class Gate(nn.Module):
         Returns:
             Tuple[torch.Tensor, torch.Tensor]: Routing weights and selected expert indices.
         """
-        scores = linear(x, self.weight)
+        scores = linear(x, self.weight) "点积操作 x · W^T 本质上计算了输入向量 x 与每个专家权重向量的相似度。当两个向量方向相似时，点积值较大；方向相反时，点积值为负。"
         if self.score_func == "softmax":
             scores = scores.softmax(dim=-1, dtype=torch.float32)
         else:
@@ -597,6 +609,7 @@ class Gate(nn.Module):
 
 class Expert(nn.Module):
     """
+    专家模型
     Expert layer for Mixture-of-Experts (MoE) models.
 
     Attributes:
@@ -632,6 +645,7 @@ class Expert(nn.Module):
 
 class MoE(nn.Module):
     """
+    MoE 是一种稀疏激活的神经网络架构，它包含多个"专家"网络（Expert），每个输入只会激活其中的一小部分专家。这种设计可以显著增加模型参数量而不增加推理计算量，从而提高模型性能。
     Mixture-of-Experts (MoE) module.
 
     Attributes:
@@ -692,6 +706,7 @@ class MoE(nn.Module):
 
 class Block(nn.Module):
     """
+    Transformer 架构中的基本构建块
     Transformer block combining attention and feed-forward layers.
 
     Attributes:
@@ -734,6 +749,7 @@ class Block(nn.Module):
 
 class Transformer(nn.Module):
     """
+    Transformer主体网络实现
     Transformer model with positional embeddings, multiple layers, and output projection.
 
     Attributes:
