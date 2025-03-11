@@ -277,6 +277,7 @@ class RowParallelLinear(Linear):
 
 class RMSNorm(nn.Module):
     """
+    均方根归一化
     Root Mean Square Layer Normalization (RMSNorm).
 
     Args:
@@ -404,6 +405,7 @@ def apply_rotary_emb(x: torch.Tensor, freqs_cis: torch.Tensor) -> torch.Tensor:
 class MLA(nn.Module):
     """
     Multi-Headed Attention Layer (MLA).
+    MLA的核心是对KV做了低秩压缩,在送入标准MHA算法之前,用更短的一个向量来表示原来长的向量,从而大幅减少KVcache空间。
 
     Attributes:
         dim (int): Dimensionality of the input features.
